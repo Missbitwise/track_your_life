@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+*.log
+# Local editor and agent files
+agents/
+.cloud/
+.windsurf/
