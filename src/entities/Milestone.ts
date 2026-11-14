@@ -1,0 +1,2 @@
+import {Entity,PrimaryGeneratedColumn,Column,ManyToOne,JoinColumn} from "typeorm"; import {Goal} from "./Goal.js";
+@Entity("milestones") export class Milestone { @PrimaryGeneratedColumn() id!:number; @Column({type:"int"}) goal_id!:number; @Column({type:"varchar",length:255}) title!:string; @Column({type:"date",nullable:true}) target_date!:string|null; @Column({type:"varchar",length:50,default:"PENDING",nullable:true}) status!:string|null; @ManyToOne(()=>Goal,x=>x.milestones,{onDelete:"CASCADE"}) @JoinColumn({name:"goal_id"}) goal!:Goal; }

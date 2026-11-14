@@ -1,0 +1,2 @@
+import {Entity,PrimaryGeneratedColumn,Column,ManyToOne,JoinColumn} from "typeorm"; import {User} from "./User.js";
+@Entity("notifications") export class Notification { @PrimaryGeneratedColumn() id!:number; @Column({type:"int"}) user_id!:number; @Column({type:"text"}) message!:string; @Column({type:"boolean",default:false,nullable:true}) is_read!:boolean|null; @Column({type:"timestamptz",default:()=>"CURRENT_TIMESTAMP"}) created_at!:Date; @ManyToOne(()=>User,x=>x.notifications,{onDelete:"CASCADE"}) @JoinColumn({name:"user_id"}) user!:User; }

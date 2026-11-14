@@ -1,0 +1,2 @@
+import {Entity,PrimaryGeneratedColumn,Column,ManyToOne,OneToMany,JoinColumn} from "typeorm"; import {User} from "./User.js"; import {TaskTag} from "./TaskTag.js";
+@Entity("tags") export class Tag { @PrimaryGeneratedColumn() id!:number; @Column({type:"varchar",length:50}) name!:string; @Column({type:"int"}) user_id!:number; @ManyToOne(()=>User,x=>x.tags,{onDelete:"CASCADE"}) @JoinColumn({name:"user_id"}) user!:User; @OneToMany(()=>TaskTag,x=>x.tag) task_tags!:TaskTag[]; }

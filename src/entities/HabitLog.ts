@@ -1,0 +1,2 @@
+import {Entity,PrimaryGeneratedColumn,Column,ManyToOne,JoinColumn} from "typeorm"; import {Habit} from "./Habit.js";
+@Entity("habit_logs") export class HabitLog { @PrimaryGeneratedColumn() id!:number; @Column({type:"int"}) habit_id!:number; @Column({type:"date"}) date!:string; @Column({type:"boolean",default:false,nullable:true}) completed!:boolean|null; @Column({type:"timestamptz",default:()=>"CURRENT_TIMESTAMP"}) created_at!:Date; @ManyToOne(()=>Habit,x=>x.logs,{onDelete:"CASCADE"}) @JoinColumn({name:"habit_id"}) habit!:Habit; }

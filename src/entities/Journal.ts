@@ -1,0 +1,2 @@
+import {Entity,PrimaryGeneratedColumn,Column,ManyToOne,JoinColumn} from "typeorm"; import {User} from "./User.js";
+@Entity("journal") export class Journal { @PrimaryGeneratedColumn() id!:number; @Column({type:"int"}) user_id!:number; @Column({type:"text"}) content!:string; @Column({type:"date"}) date!:string; @Column({type:"timestamptz",default:()=>"CURRENT_TIMESTAMP"}) created_at!:Date; @ManyToOne(()=>User,x=>x.journal_entries,{onDelete:"CASCADE"}) @JoinColumn({name:"user_id"}) user!:User; }

@@ -1,0 +1,2 @@
+import {Entity,PrimaryGeneratedColumn,Column,ManyToOne,JoinColumn,Check} from "typeorm"; import {User} from "./User.js";
+@Entity("moods") @Check("mood_score BETWEEN 1 AND 10") export class Mood { @PrimaryGeneratedColumn() id!:number; @Column({type:"int"}) user_id!:number; @Column({type:"int",nullable:true}) mood_score!:number|null; @Column({type:"text",nullable:true}) note!:string|null; @Column({type:"date"}) date!:string; @ManyToOne(()=>User,x=>x.moods,{onDelete:"CASCADE"}) @JoinColumn({name:"user_id"}) user!:User; }
