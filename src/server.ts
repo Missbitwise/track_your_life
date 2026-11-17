@@ -2,6 +2,7 @@ import "dotenv/config";
 import type { AddressInfo } from "node:net";
 import { app, setDatabaseConnected } from "./app.js";
 import { connectDatabase, disconnectDatabase } from "./config/database.js";
+import { validateJwtConfiguration } from "./config/jwt.js";
 import { logger } from "./config/logger.js";
 
 const port = Number(process.env.PORT ?? 3000);
@@ -46,6 +47,14 @@ function errorMetadata(error: unknown): { name: string; code?: string; databaseC
 }
 
 async function startServer(): Promise<void> {
+  try {
+    validateJwtConfiguration();
+  } catch {
+    logger.fatal("JWT configuration is invalid; set separate JWT_ACCESS_SECRET and JWT_REFRESH_SECRET values before starting the server");
+    process.exitCode = 1;
+    return;
+  }
+
   try {
     await connectDatabase();
     setDatabaseConnected(true);
