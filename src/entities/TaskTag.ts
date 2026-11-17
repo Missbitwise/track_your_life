@@ -1,2 +1,0 @@
-import {Entity,PrimaryColumn,ManyToOne,JoinColumn} from "typeorm"; import {Task} from "./Task.js"; import {Tag} from "./Tag.js";
-@Entity("task_tags") export class TaskTag { @PrimaryColumn({type:"int"}) task_id!:number; @PrimaryColumn({type:"int"}) tag_id!:number; @ManyToOne(()=>Task,x=>x.task_tags,{onDelete:"CASCADE"}) @JoinColumn({name:"task_id"}) task!:Task; @ManyToOne(()=>Tag,x=>x.task_tags,{onDelete:"CASCADE"}) @JoinColumn({name:"tag_id"}) tag!:Tag; }
