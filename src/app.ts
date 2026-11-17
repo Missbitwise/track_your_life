@@ -4,6 +4,9 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { pinoHttp } from "pino-http";
 import { logger } from "./config/logger.js";
+import { authRoutes } from "./routes/auth.routes.js";
+import { routineRoutes } from "./routes/routine.routes.js";
+import { taskRoutes } from "./routes/task.routes.js";
 
 export const app = express();
 let databaseConnected = false;
@@ -36,6 +39,10 @@ app.get("/health", (_request, response) => {
     database: databaseConnected ? "connected" : "disconnected",
   });
 });
+
+app.use("/api/auth", authRoutes);
+app.use("/api/routines", routineRoutes);
+app.use("/api/tasks", taskRoutes);
 
 app.use((_request, response) => {
   response.status(404).json({ error: "Not found" });
