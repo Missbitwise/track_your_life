@@ -1,8 +1,53 @@
-import { Entity, PrimaryGeneratedColumn, Column, OneToMany } from "typeorm";
-import { Category } from "./Category.js"; import { Tag } from "./Tag.js"; import { Task } from "./Task.js"; import { Habit } from "./Habit.js"; import { FocusSession } from "./FocusSession.js"; import { TimeLog } from "./TimeLog.js"; import { Note } from "./Note.js"; import { Goal } from "./Goal.js"; import { Notification } from "./Notification.js"; import { Mood } from "./Mood.js"; import { Journal } from "./Journal.js"; import { DailyCore } from "./DailyCore.js";
-@Entity("users") export class User {
- @PrimaryGeneratedColumn() id!: number; @Column({type:"varchar",length:255,unique:true}) email!: string; @Column({type:"varchar",length:255}) password_hash!: string;
- @Column({type:"varchar",length:100,nullable:true}) first_name!: string|null; @Column({type:"varchar",length:100,nullable:true}) last_name!: string|null;
- @Column({type:"timestamptz",default:()=>"CURRENT_TIMESTAMP"}) created_at!: Date; @Column({type:"timestamptz",default:()=>"CURRENT_TIMESTAMP"}) updated_at!: Date;
- @OneToMany(()=>Category,x=>x.user) categories!: Category[]; @OneToMany(()=>Tag,x=>x.user) tags!: Tag[]; @OneToMany(()=>Task,x=>x.user) tasks!: Task[]; @OneToMany(()=>Habit,x=>x.user) habits!: Habit[]; @OneToMany(()=>FocusSession,x=>x.user) focus_sessions!: FocusSession[]; @OneToMany(()=>TimeLog,x=>x.user) time_logs!: TimeLog[]; @OneToMany(()=>Note,x=>x.user) notes!: Note[]; @OneToMany(()=>Goal,x=>x.user) goals!: Goal[]; @OneToMany(()=>Notification,x=>x.user) notifications!: Notification[]; @OneToMany(()=>Mood,x=>x.user) moods!: Mood[]; @OneToMany(()=>Journal,x=>x.user) journal_entries!: Journal[]; @OneToMany(()=>DailyCore,x=>x.user) daily_core_entries!: DailyCore[];
+import { Column, Entity, Index, OneToMany, PrimaryGeneratedColumn, UpdateDateColumn } from "typeorm";
+import { Note } from "./Note.js";
+import { Notification } from "./Notification.js";
+import { Reminder } from "./Reminder.js";
+import { RefreshToken } from "./RefreshToken.js";
+import { Routine } from "./Routine.js";
+import { Task } from "./Task.js";
+
+@Index("uq_users_email_lower", { synchronize: false })
+@Entity({ name: "users" })
+export class User {
+  @PrimaryGeneratedColumn()
+  id!: number;
+
+  @Column({ type: "varchar", length: 255 })
+  email!: string;
+
+  @Column({ type: "varchar", length: 255 })
+  password_hash!: string;
+
+  @Column({ type: "varchar", length: 100, nullable: true })
+  first_name!: string | null;
+
+  @Column({ type: "varchar", length: 100, nullable: true })
+  last_name!: string | null;
+
+  @Column({ type: "varchar", length: 64, default: "UTC" })
+  time_zone!: string;
+
+  @Column({ type: "timestamptz", default: () => "CURRENT_TIMESTAMP" })
+  created_at!: Date;
+
+  @UpdateDateColumn({ type: "timestamptz", default: () => "CURRENT_TIMESTAMP" })
+  updated_at!: Date;
+
+  @OneToMany(() => RefreshToken, (refreshToken) => refreshToken.user)
+  refresh_tokens!: RefreshToken[];
+
+  @OneToMany(() => Task, (task) => task.user)
+  tasks!: Task[];
+
+  @OneToMany(() => Routine, (routine) => routine.user)
+  routines!: Routine[];
+
+  @OneToMany(() => Reminder, (reminder) => reminder.user)
+  reminders!: Reminder[];
+
+  @OneToMany(() => Notification, (notification) => notification.user)
+  notifications!: Notification[];
+
+  @OneToMany(() => Note, (note) => note.user)
+  notes!: Note[];
 }
