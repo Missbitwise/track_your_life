@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; media-src blob: data:; connect-src 'none'; object-src 'none'; base-uri 'none'" />
+  <title>Productivity Reminders</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="shell">
+    <header class="header">
+      <div><p class="eyebrow">DESKTOP COMPANION</p><h1>Reminders</h1></div>
+      <button id="sync-button" class="secondary hidden" type="button">Sync now</button>
+    </header>
+
+    <p id="message" class="message hidden" role="status"></p>
+
+    <section id="login-panel" class="panel hidden">
+      <h2>Sign in</h2>
+      <p class="muted">Sign in with your Productivity account. Your session tokens are encrypted by Windows and stay in this app.</p>
+      <form id="login-form" class="form">
+        <label>Backend URL<input id="api-origin" type="url" value="http://localhost:3000" required autocomplete="url" /></label>
+        <label>Email<input id="email" type="email" required autocomplete="username" /></label>
+        <label>Password<input id="password" type="password" required autocomplete="current-password" /></label>
+        <button class="primary" type="submit">Sign in</button>
+      </form>
+    </section>
+
+    <section id="account-panel" class="panel hidden">
+      <div class="account-row"><div><h2 id="account-name">Account</h2><p id="account-email" class="muted"></p></div><button id="logout-button" class="secondary" type="button">Sign out</button></div>
+      <div class="settings">
+        <div class="setting-row"><div><strong>Reminder sound</strong><p id="sound-name" class="muted">No sound selected</p></div><button id="sound-button" class="secondary" type="button">Choose audio</button></div>
+        <label>Sound ringing duration <span class="inline-control"><input id="ring-duration" type="number" min="5" max="600" /> seconds</span></label>
+        <label>Snooze duration <span class="inline-control"><input id="snooze-duration" type="number" min="1" max="60" /> minutes</span></label>
+        <label class="check-row"><input id="launch-startup" type="checkbox" /> Launch when Windows starts</label>
+      </div>
+    </section>
+
+    <section id="reminders-panel" class="panel hidden">
+      <div class="section-heading"><div><h2>Scheduled reminders</h2><p class="muted">Choose how each reminder is delivered on this desktop.</p></div></div>
+      <div id="reminder-list" class="reminder-list"></div>
+      <p id="empty-state" class="muted hidden">No reminders found. New scheduled reminders will appear after syncing.</p>
+    </section>
+    <footer>Closing this window keeps reminders running in the system tray.</footer>
+  </main>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
