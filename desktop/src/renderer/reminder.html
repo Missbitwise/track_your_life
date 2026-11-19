@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; media-src data:; connect-src 'none'; object-src 'none'; base-uri 'none'" />
+  <title>Reminder due</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="popup-body">
+  <main class="popup">
+    <div class="popup-icon" aria-hidden="true">!</div>
+    <p class="eyebrow">REMINDER DUE</p>
+    <h1 id="reminder-title">It's time</h1>
+    <p id="reminder-time" class="muted"></p>
+    <div class="popup-actions">
+      <button id="snooze-button" class="secondary" type="button">Snooze</button>
+      <button id="dismiss-button" class="primary" type="button">Dismiss</button>
+    </div>
+    <p id="sound-warning" class="muted hidden">Choose an audio file in settings to enable ringing.</p>
+    <audio id="ringer" loop></audio>
+  </main>
+  <script type="module" src="reminder.js"></script>
+</body>
+</html>
