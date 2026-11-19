@@ -1,0 +1,15 @@
+# Installed dependencies
+node_modules/
+
+# Compiled Electron and TypeScript output
+dist/
+
+# Packaged installers and release artifacts
+release/
+out/
+artifacts/
+
+# Local environment and logs
+.env
+.env.*.local
+*.log
