@@ -39,6 +39,7 @@ export interface DesktopApi {
   syncReminders(): Promise<DesktopReminder[]>;
   setDeliveryMode(reminderId: number, mode: DeliveryMode): Promise<void>;
   getSettings(): Promise<DesktopSettings>;
+  testNotification(): Promise<void>;
   updateSettings(settings: Pick<DesktopSettings, "ringingDurationSeconds" | "snoozeMinutes">): Promise<DesktopSettings>;
   chooseSoundFile(): Promise<string | null>;
   setLaunchAtStartup(enabled: boolean): Promise<void>;
