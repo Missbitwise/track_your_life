@@ -50,7 +50,27 @@ app.use((_request, response) => {
   response.status(404).json({ error: "Not found" });
 });
 
+function safeErrorMetadata(error: unknown): Record<string, string> {
+  if (typeof error !== "object" || error === null) return { name: "UnknownError" };
+
+  const metadata: Record<string, string> = {
+    name: error instanceof Error ? error.name : "UnknownError",
+  };
+  if ("code" in error && typeof error.code === "string") metadata.code = error.code;
+
+  if ("driverError" in error && typeof error.driverError === "object" && error.driverError !== null) {
+    const driverError = error.driverError as Record<string, unknown>;
+    for (const field of ["code", "constraint", "table", "column", "schema"] as const) {
+      if (field in driverError && typeof driverError[field] === "string") {
+        metadata[`database${field[0].toUpperCase()}${field.slice(1)}`] = driverError[field];
+      }
+    }
+  }
+
+  return metadata;
+}
+
 app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
-  logger.error("Unhandled request error");
+  logger.error({ error: safeErrorMetadata(error) }, "Unhandled request error");
   response.status(500).json({ error: "Internal server error" });
 });
