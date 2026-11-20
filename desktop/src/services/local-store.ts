@@ -127,15 +127,20 @@ export class LocalStore {
   }
 
   async saveSecrets(value: string): Promise<void> {
-    if (!safeStorage.isEncryptionAvailable()) throw new Error("Windows secure token storage is unavailable");
-    const encrypted = safeStorage.encryptString(value);
+    if (!await safeStorage.isAsyncEncryptionAvailable()) throw new Error("Windows secure token storage is unavailable");
+    const encrypted = await safeStorage.encryptStringAsync(value);
     await writeFile(this.secretPath, encrypted, { mode: 0o600 });
   }
 
   async loadSecrets(): Promise<string | null> {
-    if (!safeStorage.isEncryptionAvailable()) return null;
+    if (!await safeStorage.isAsyncEncryptionAvailable()) return null;
     try {
-      return safeStorage.decryptString(await readFile(this.secretPath));
+      const encrypted = await readFile(this.secretPath);
+      const decrypted = await safeStorage.decryptStringAsync(encrypted);
+      if (decrypted.shouldReEncrypt) {
+        await writeFile(this.secretPath, await safeStorage.encryptStringAsync(decrypted.result), { mode: 0o600 });
+      }
+      return decrypted.result;
     } catch {
       return null;
     }
