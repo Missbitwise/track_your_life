@@ -1,5 +1,5 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, Tray, type OpenDialogOptions } from "electron";
-import { readFile } from "node:fs/promises";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, shell, Tray, type OpenDialogOptions } from "electron";
+import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { ActiveSoundReminder, DeliveryMode, DesktopSettings } from "./shared.js";
 import { BackendClient, validateApiOrigin } from "./services/backend-client.js";
@@ -7,7 +7,12 @@ import { LocalStore } from "./services/local-store.js";
 import { ReminderScheduler } from "./services/reminder-scheduler.js";
 
 app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
-app.setAppUserModelId("com.productivity.reminders");
+const notificationAppUserModelId = app.isPackaged ? "com.productivity.reminders" : process.execPath;
+const toastActivatorClsid = "{DCC4B67A-1EAD-4E8F-9B81-24A00EAE5A30}";
+if (process.platform === "win32") {
+  app.setAppUserModelId(notificationAppUserModelId);
+  app.setToastActivatorCLSID(toastActivatorClsid);
+}
 
 const singleInstance = app.requestSingleInstanceLock();
 if (!singleInstance) app.quit();
@@ -123,6 +128,24 @@ function createTray(): void {
   tray.on("double-click", () => createMainWindow(true));
 }
 
+async function registerWindowsNotificationShortcut(): Promise<void> {
+  if (process.platform !== "win32") return;
+
+  const programsDirectory = path.join(app.getPath("appData"), "Microsoft", "Windows", "Start Menu", "Programs");
+  await mkdir(programsDirectory, { recursive: true });
+  const shortcutPath = path.join(programsDirectory, "Productivity Reminders.lnk");
+  const created = shell.writeShortcutLink(shortcutPath, "create", {
+    target: process.execPath,
+    args: `"${app.getAppPath()}"`,
+    description: "Productivity desktop reminders",
+    icon: process.execPath,
+    iconIndex: 0,
+    appUserModelId: notificationAppUserModelId,
+    toastActivatorClsid,
+  });
+  if (!created) console.error("Could not register the Productivity Reminders Start Menu shortcut for Windows notifications");
+}
+
 function buildTrayMenu(): Electron.Menu {
   return Menu.buildFromTemplate([
     { label: "Open Productivity Reminders", click: () => createMainWindow(true) },
@@ -172,6 +195,27 @@ function registerIpc(): void {
     await store.setDeliveryMode(id as number, mode as DeliveryMode);
   });
   ipcMain.handle("desktop:get-settings", () => store.getSettings());
+  ipcMain.handle("desktop:test-notification", async () => {
+    if (!Notification.isSupported()) throw new Error("Windows notifications are not supported on this system");
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const finish = (error?: Error) => {
+        if (settled) return;
+        settled = true;
+        if (error) reject(error);
+        else resolve();
+      };
+      const notification = new Notification({
+        title: "Productivity notification test",
+        body: "Windows desktop notifications are working.",
+        silent: true,
+      });
+      notification.once("show", () => finish());
+      notification.once("failed", (_event, error) => finish(new Error(error)));
+      notification.show();
+      setTimeout(() => finish(new Error("Windows did not confirm the test notification")), 10_000).unref();
+    });
+  });
   ipcMain.handle("desktop:update-settings", async (_event, input: unknown) => {
     if (typeof input !== "object" || input === null) throw new Error("Invalid settings");
     const settings = input as Partial<DesktopSettings>;
@@ -245,6 +289,7 @@ void app.whenReady().then(async () => {
   await backend.restore();
   if (backend.getUser()) await store.useAccount(backend.getUser()!.id);
   registerIpc();
+  await registerWindowsNotificationShortcut();
   createTray();
   createMainWindow(true);
   if (backend.getUser()) scheduler.start();
