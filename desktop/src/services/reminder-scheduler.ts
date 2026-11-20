@@ -62,9 +62,10 @@ export class ReminderScheduler {
           break;
         }
 
-        // Persist before invoking the OS notification to avoid showing it twice after a crash.
+        const shown = await this.showNormalNotification(reminder);
+        if (!shown) continue;
+        // Only consume the reminder after Electron confirms Windows displayed it.
         await this.store.markHandled(key);
-        this.showNormalNotification(reminder);
         void this.backend.markSent(reminder.id).catch(() => undefined);
       }
 
@@ -156,12 +157,32 @@ export class ReminderScheduler {
     void this.syncNow().catch(() => undefined);
   }
 
-  private showNormalNotification(reminder: ApiReminder): void {
-    if (!Notification.isSupported()) return;
+  private showNormalNotification(reminder: ApiReminder): Promise<boolean> {
+    if (!Notification.isSupported()) return Promise.resolve(false);
     const body = reminder.task_id === null
       ? "A scheduled reminder is due."
       : `A reminder for task ${reminder.task_id} is due.`;
-    new Notification({ title: "Productivity reminder", body, silent: true }).show();
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (shown: boolean) => {
+        if (settled) return;
+        settled = true;
+        resolve(shown);
+      };
+      try {
+        const notification = new Notification({ title: "Productivity reminder", body, silent: false });
+        notification.once("show", () => finish(true));
+        notification.once("failed", (_event, error) => {
+          console.error("Windows reminder notification failed:", error);
+          finish(false);
+        });
+        notification.show();
+        setTimeout(() => finish(false), 10_000).unref();
+      } catch (error) {
+        console.error("Windows reminder notification could not be created:", error);
+        finish(false);
+      }
+    });
   }
 }
 
