@@ -136,6 +136,15 @@ $("#sound-button").addEventListener("click", async () => {
   }
 });
 
+$("#test-notification-button").addEventListener("click", async () => {
+  try {
+    await api.testNotification();
+    showMessage("Windows confirmed the test notification.");
+  } catch (error) {
+    showMessage(error.message, true);
+  }
+});
+
 async function saveTimingSettings() {
   try {
     await api.updateSettings({
