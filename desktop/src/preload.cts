@@ -9,6 +9,7 @@ const desktopApi: DesktopApi = {
   syncReminders: () => ipcRenderer.invoke("desktop:sync-reminders"),
   setDeliveryMode: (reminderId, mode) => ipcRenderer.invoke("desktop:set-delivery-mode", reminderId, mode),
   getSettings: () => ipcRenderer.invoke("desktop:get-settings"),
+  testNotification: () => ipcRenderer.invoke("desktop:test-notification"),
   updateSettings: (settings) => ipcRenderer.invoke("desktop:update-settings", settings),
   chooseSoundFile: () => ipcRenderer.invoke("desktop:choose-sound"),
   setLaunchAtStartup: (enabled) => ipcRenderer.invoke("desktop:set-startup", enabled),
