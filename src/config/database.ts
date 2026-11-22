@@ -9,6 +9,7 @@ export const appDataSource = new DataSource({
   entities: Object.values(entities),
   migrations: ["src/migrations/*.ts"],
   migrationsTableName: "typeorm_migrations",
+  migrationsTransactionMode: "each",
   synchronize: false,
   logging: false,
 });
