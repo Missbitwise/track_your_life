@@ -7,6 +7,7 @@ import { User } from "./User.js";
 @Entity({ name: "routines" })
 @Check("ck_routines_date_range", `"ends_on" IS NULL OR "ends_on" >= "starts_on"`)
 @Index("ix_routines_active_user", ["user_id", "id"], { where: `"is_active" = TRUE` })
+@Index("ix_routines_user_not_deleted", ["user_id", "id"], { where: `"deleted_at" IS NULL` })
 export class Routine {
   @PrimaryGeneratedColumn()
   id!: number;
@@ -31,6 +32,9 @@ export class Routine {
 
   @Column({ type: "boolean", default: true })
   is_active!: boolean;
+
+  @Column({ type: "timestamptz", nullable: true, select: false })
+  deleted_at!: Date | null;
 
   @Column({ type: "timestamptz", default: () => "CURRENT_TIMESTAMP" })
   created_at!: Date;
