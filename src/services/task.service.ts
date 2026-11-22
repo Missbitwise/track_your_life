@@ -1,7 +1,13 @@
 import { appDataSource } from "../config/database.js";
+import { TaskActivityEvent, type TaskActivityEventType, type TaskActivitySnapshot } from "../entities/TaskActivityEvent.js";
 import { Routine } from "../entities/Routine.js";
+import { RoutineVersion } from "../entities/RoutineVersion.js";
+import { RoutineVersionWeekday } from "../entities/RoutineVersionWeekday.js";
 import { Task } from "../entities/Task.js";
+import { User } from "../entities/User.js";
 import type { CreateTaskBody, TaskStatus, UpdateTaskBody } from "../validators/task.validator.js";
+import type { EntityManager } from "typeorm";
+import { databaseNow, getActiveTimeZone, localDateAt } from "./time-zone.service.js";
 
 export class TaskNotFoundError extends Error {
   constructor() {
@@ -22,42 +28,194 @@ function isoWeekday(date: string): number {
   return weekday === 0 ? 7 : weekday;
 }
 
+function normalizeSqlTime(value: string | null): string | null {
+  if (value === null) return null;
+  const [clock, fraction = ""] = value.split(".");
+  const [hours, minutes, seconds = "00"] = clock.split(":");
+  const normalizedFraction = fraction.replace(/0+$/, "");
+  return `${hours}:${minutes}:${seconds}${normalizedFraction ? `.${normalizedFraction}` : ""}`;
+}
+
 function isRoutineDateConflict(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "23505";
 }
 
-export async function createTask(userId: number, input: CreateTaskBody): Promise<Task> {
-  const repository = appDataSource.getRepository(Task);
-  const task = repository.create({
+interface RoutineOrigin {
+  routineId: number;
+  occurrenceDate: string;
+}
+
+async function getRoutineOrigin(
+  manager: EntityManager,
+  userId: number,
+  task: Task,
+): Promise<RoutineOrigin | null> {
+  const priorOrigin = await manager.getRepository(TaskActivityEvent)
+    .createQueryBuilder("event")
+    .select(["event.routine_id_snapshot", "event.routine_occurrence_date"])
+    .where("event.user_id = :userId", { userId })
+    .andWhere("event.task_id = :taskId", { taskId: task.id })
+    .andWhere("event.routine_id_snapshot IS NOT NULL")
+    .orderBy("event.event_sequence", "ASC")
+    .getOne();
+
+  if (priorOrigin?.routine_id_snapshot !== null && priorOrigin?.routine_id_snapshot !== undefined
+    && priorOrigin.routine_occurrence_date !== null) {
+    return {
+      routineId: priorOrigin.routine_id_snapshot,
+      occurrenceDate: priorOrigin.routine_occurrence_date,
+    };
+  }
+
+  if (task.routine_id === null) return null;
+  return { routineId: task.routine_id, occurrenceDate: task.task_date };
+}
+
+export function snapshotTask(
+  task: Task,
+  origin: RoutineOrigin | null,
+  changeSource?: TaskActivitySnapshot["change_source"],
+): TaskActivitySnapshot {
+  return {
+    title: task.title,
+    description: task.description,
+    task_date: task.task_date,
+    scheduled_time: task.scheduled_time,
+    status: task.status,
+    completed_at: task.completed_at?.toISOString() ?? null,
+    routine_id: origin?.routineId ?? null,
+    routine_occurrence_date: origin?.occurrenceDate ?? null,
+    ...(changeSource ? { change_source: changeSource } : {}),
+  };
+}
+
+async function nextEventSequence(manager: EntityManager, userId: number, taskId: number): Promise<number> {
+  await manager.query("SELECT pg_advisory_xact_lock($1, $2)", [userId, taskId]);
+  const result = await manager.getRepository(TaskActivityEvent)
+    .createQueryBuilder("event")
+    .select("COALESCE(MAX(event.event_sequence), 0)", "max_sequence")
+    .where("event.user_id = :userId", { userId })
+    .andWhere("event.task_id = :taskId", { taskId })
+    .getRawOne<{ max_sequence: string | number }>();
+  return Number(result?.max_sequence ?? 0) + 1;
+}
+
+export async function recordTaskEvent(
+  manager: EntityManager,
+  userId: number,
+  task: Task,
+  eventType: TaskActivityEventType,
+  beforeSnapshot: TaskActivitySnapshot | null,
+  origin?: RoutineOrigin | null,
+  eventAt?: Date,
+): Promise<void> {
+  const timestamp = eventAt ?? await databaseNow(manager);
+  const routineOrigin = origin === undefined
+    ? await getRoutineOrigin(manager, userId, task)
+    : origin;
+  const timeZone = await getActiveTimeZone(manager, userId, timestamp);
+  const repository = manager.getRepository(TaskActivityEvent);
+  await repository.save(repository.create({
     user_id: userId,
-    routine_id: null,
-    title: input.title,
-    description: input.description ?? null,
-    task_date: input.task_date,
-    scheduled_time: input.scheduled_time ?? null,
-    status: "pending",
-    completed_at: null,
+    task_id: task.id,
+    event_sequence: await nextEventSequence(manager, userId, task.id),
+    event_type: eventType,
+    event_at: timestamp,
+    activity_local_date: localDateAt(timestamp, timeZone),
+    time_zone: timeZone,
+    task_title: task.title,
+    task_description: task.description,
+    task_date: task.task_date,
+    scheduled_time: task.scheduled_time,
+    status: task.status,
+    completed_at: task.completed_at,
+    routine_id_snapshot: routineOrigin?.routineId ?? null,
+    routine_occurrence_date: routineOrigin?.occurrenceDate ?? null,
+    before_snapshot: beforeSnapshot,
+  }));
+}
+
+async function lockUserForTaskWrites(manager: EntityManager, userId: number): Promise<void> {
+  const user = await manager.getRepository(User).findOne({
+    where: { id: userId },
+    select: { id: true },
+    lock: { mode: "pessimistic_read" },
   });
-  return repository.save(task);
+  if (!user) throw new Error("Task owner not found");
+}
+
+export async function createTask(userId: number, input: CreateTaskBody): Promise<Task> {
+  return appDataSource.transaction(async (manager) => {
+    await lockUserForTaskWrites(manager, userId);
+    const repository = manager.getRepository(Task);
+    const task = await repository.save(repository.create({
+      user_id: userId,
+      routine_id: null,
+      title: input.title,
+      description: input.description ?? null,
+      task_date: input.task_date,
+      scheduled_time: input.scheduled_time ?? null,
+      status: "pending",
+      completed_at: null,
+    }));
+    await recordTaskEvent(manager, userId, task, "created", null, null);
+    return task;
+  });
 }
 
 export async function getTasksForDate(userId: number, taskDate: string): Promise<Task[]> {
   return appDataSource.transaction(async (manager) => {
-    const routines = await manager.getRepository(Routine)
-      .createQueryBuilder("routine")
-      .innerJoin("routine.weekdays", "weekday")
-      .where("routine.user_id = :userId", { userId })
-      .andWhere("routine.is_active = TRUE")
-      .andWhere("routine.starts_on <= :taskDate", { taskDate })
-      .andWhere("(routine.ends_on IS NULL OR routine.ends_on >= :taskDate)", { taskDate })
+    const account = await manager.getRepository(User)
+      .createQueryBuilder("user")
+      .where("user.id = :userId", { userId })
+      .setLock("pessimistic_read")
+      .getOne();
+    if (!account) throw new Error("Task owner not found while generating routine tasks");
+
+    const candidateRows = await manager.getRepository(RoutineVersion)
+      .createQueryBuilder("version")
+      .select("DISTINCT version.routine_id", "routine_id")
+      .where("version.user_id = :userId", { userId })
+      .andWhere("version.effective_from_date <= :taskDate", { taskDate })
+      .getRawMany<{ routine_id: number | string }>();
+    const candidateRoutineIds = candidateRows.map((row) => Number(row.routine_id));
+
+    // Routine edits/deletes lock these rows too. Lock then re-read version history
+    // so generation cannot persist an outdated version during a concurrent change.
+    if (candidateRoutineIds.length > 0) {
+      await manager.getRepository(Routine)
+        .createQueryBuilder("routine")
+        .where("routine.user_id = :userId", { userId })
+        .andWhere("routine.id IN (:...routineIds)", { routineIds: candidateRoutineIds })
+        .orderBy("routine.id", "ASC")
+        .setLock("pessimistic_read")
+        .getMany();
+    }
+
+    const routines = await manager.getRepository(RoutineVersion)
+      .createQueryBuilder("version")
+      .innerJoin(RoutineVersionWeekday, "weekday", "weekday.routine_version_id = version.id")
+      .where("version.user_id = :userId", { userId })
+      .andWhere("version.effective_from_date <= :taskDate", { taskDate })
+      .andWhere(`version.version_no = (
+        SELECT MAX(candidate.version_no)
+        FROM routine_versions AS candidate
+        WHERE candidate.user_id = version.user_id
+          AND candidate.routine_id = version.routine_id
+          AND candidate.effective_from_date <= :taskDate
+      )`, { taskDate })
+      .andWhere("version.change_type <> 'deleted'")
+      .andWhere("version.is_active = TRUE")
+      .andWhere("version.starts_on <= :taskDate", { taskDate })
+      .andWhere("(version.ends_on IS NULL OR version.ends_on >= :taskDate)", { taskDate })
       .andWhere("weekday.iso_weekday = :isoWeekday", { isoWeekday: isoWeekday(taskDate) })
-      .orderBy("routine.id", "ASC")
+      .orderBy("version.routine_id", "ASC")
       .getMany();
 
     if (routines.length > 0) {
       const generatedTasks = routines.map((routine) => ({
         user_id: userId,
-        routine_id: routine.id,
+        routine_id: routine.routine_id,
         title: routine.title,
         description: routine.description,
         task_date: taskDate,
@@ -67,7 +225,36 @@ export async function getTasksForDate(userId: number, taskDate: string): Promise
       }));
 
       // The database unique constraint makes this safe across concurrent date requests.
-      await manager.getRepository(Task).createQueryBuilder().insert().values(generatedTasks).orIgnore().execute();
+      const inserted = await manager.getRepository(Task).createQueryBuilder()
+        .insert()
+        .values(generatedTasks)
+        .orIgnore()
+        .returning(["id", "routine_id"])
+        .execute();
+
+      const insertedRows = inserted.raw as Array<{ id: number | string; routine_id: number }>;
+      if (insertedRows.length > 0) {
+        const routinesById = new Map(routines.map((routine) => [routine.routine_id, routine]));
+        for (const row of insertedRows) {
+          const routine = routinesById.get(Number(row.routine_id));
+          if (!routine) throw new Error("Inserted routine task could not be matched to its routine");
+          const task = new Task();
+          task.id = Number(row.id);
+          task.user_id = userId;
+          task.routine_id = routine.routine_id;
+          task.title = routine.title;
+          task.description = routine.description;
+          task.task_date = taskDate;
+          task.scheduled_time = routine.scheduled_time;
+          task.status = "pending";
+          task.completed_at = null;
+
+          await recordTaskEvent(manager, userId, task, "created", null, {
+            routineId: routine.routine_id,
+            occurrenceDate: taskDate,
+          }, await databaseNow(manager));
+        }
+      }
     }
 
     return manager.getRepository(Task).find({
@@ -80,6 +267,7 @@ export async function getTasksForDate(userId: number, taskDate: string): Promise
 export async function updateTask(userId: number, taskId: number, input: UpdateTaskBody): Promise<Task> {
   try {
     return await appDataSource.transaction(async (manager) => {
+      await lockUserForTaskWrites(manager, userId);
       const repository = manager.getRepository(Task);
       const task = await repository.findOne({
         where: { id: taskId, user_id: userId },
@@ -87,12 +275,36 @@ export async function updateTask(userId: number, taskId: number, input: UpdateTa
       });
       if (!task) throw new TaskNotFoundError();
 
-      if (input.title !== undefined) task.title = input.title;
-      if (input.description !== undefined) task.description = input.description;
-      if (input.task_date !== undefined) task.task_date = input.task_date;
-      if (input.scheduled_time !== undefined) task.scheduled_time = input.scheduled_time;
+      const origin = await getRoutineOrigin(manager, userId, task);
+      const beforeSnapshot = snapshotTask(task, origin);
+      let changed = false;
+      let rescheduled = false;
 
-      return repository.save(task);
+      if (input.title !== undefined && input.title !== task.title) {
+        task.title = input.title;
+        changed = true;
+      }
+      if (input.description !== undefined && input.description !== task.description) {
+        task.description = input.description;
+        changed = true;
+      }
+      if (input.task_date !== undefined && input.task_date !== task.task_date) {
+        task.task_date = input.task_date;
+        changed = true;
+        rescheduled = true;
+      }
+      if (input.scheduled_time !== undefined
+        && normalizeSqlTime(input.scheduled_time) !== normalizeSqlTime(task.scheduled_time)) {
+        task.scheduled_time = input.scheduled_time;
+        changed = true;
+        rescheduled = true;
+      }
+
+      if (!changed) return task;
+
+      const savedTask = await repository.save(task);
+      await recordTaskEvent(manager, userId, savedTask, rescheduled ? "rescheduled" : "updated", beforeSnapshot, origin);
+      return savedTask;
     });
   } catch (error) {
     if (isRoutineDateConflict(error)) throw new TaskRoutineDateConflictError();
@@ -101,16 +313,158 @@ export async function updateTask(userId: number, taskId: number, input: UpdateTa
 }
 
 export async function setTaskStatus(userId: number, taskId: number, status: TaskStatus): Promise<Task> {
-  const repository = appDataSource.getRepository(Task);
-  const task = await repository.findOne({ where: { id: taskId, user_id: userId } });
-  if (!task) throw new TaskNotFoundError();
+  return appDataSource.transaction(async (manager) => {
+    await lockUserForTaskWrites(manager, userId);
+    const repository = manager.getRepository(Task);
+    const task = await repository.findOne({
+      where: { id: taskId, user_id: userId },
+      lock: { mode: "pessimistic_write" },
+    });
+    if (!task) throw new TaskNotFoundError();
+    if (task.status === status) return task;
 
-  task.status = status;
-  task.completed_at = status === "completed" ? new Date() : null;
-  return repository.save(task);
+    const origin = await getRoutineOrigin(manager, userId, task);
+    const beforeSnapshot = snapshotTask(task, origin);
+    const eventAt = await databaseNow(manager);
+    task.status = status;
+    task.completed_at = status === "completed" ? eventAt : null;
+    const savedTask = await repository.save(task);
+    await recordTaskEvent(
+      manager,
+      userId,
+      savedTask,
+      status === "completed" ? "completed" : "reopened",
+      beforeSnapshot,
+      origin,
+      eventAt,
+    );
+    return savedTask;
+  });
 }
 
 export async function deleteTask(userId: number, taskId: number): Promise<void> {
-  const result = await appDataSource.getRepository(Task).delete({ id: taskId, user_id: userId });
-  if (!result.affected) throw new TaskNotFoundError();
+  await appDataSource.transaction(async (manager) => {
+    await lockUserForTaskWrites(manager, userId);
+    const repository = manager.getRepository(Task);
+    const task = await repository.findOne({
+      where: { id: taskId, user_id: userId },
+      lock: { mode: "pessimistic_write" },
+    });
+    if (!task) throw new TaskNotFoundError();
+
+    const origin = await getRoutineOrigin(manager, userId, task);
+    const beforeSnapshot = snapshotTask(task, origin);
+    await recordTaskEvent(manager, userId, task, "deleted", beforeSnapshot, origin);
+    await repository.delete({ id: taskId, user_id: userId });
+  });
+}
+
+/**
+ * Reconciles only tracked, still-pending routine tasks that have never been
+ * user-edited. Baseline tasks and tasks with ambiguous history are preserved.
+ */
+export async function reconcileFutureRoutineTasks(
+  manager: EntityManager,
+  userId: number,
+  routineId: number,
+  effectiveFromDate: string,
+): Promise<void> {
+  const tasks = await manager.getRepository(Task).createQueryBuilder("task")
+    .where("task.user_id = :userId", { userId })
+    .andWhere("task.routine_id = :routineId", { routineId })
+    .andWhere("task.task_date >= :effectiveFromDate", { effectiveFromDate })
+    .orderBy("task.id", "ASC")
+    .setLock("pessimistic_write")
+    .getMany();
+  if (tasks.length === 0) return;
+
+  const maximumDate = tasks.reduce((max, task) => task.task_date > max ? task.task_date : max, effectiveFromDate);
+  const versions = await manager.getRepository(RoutineVersion).createQueryBuilder("version")
+    .leftJoinAndSelect("version.weekdays", "weekday")
+    .where("version.user_id = :userId", { userId })
+    .andWhere("version.routine_id = :routineId", { routineId })
+    .andWhere("version.effective_from_date <= :maximumDate", { maximumDate })
+    .orderBy("version.effective_from_date", "ASC")
+    .addOrderBy("version.version_no", "ASC")
+    .getMany();
+
+  const history = await manager.getRepository(TaskActivityEvent).createQueryBuilder("event")
+    .where("event.user_id = :userId", { userId })
+    .andWhere("event.task_id IN (:...taskIds)", { taskIds: tasks.map((task) => task.id) })
+    .orderBy("event.task_id", "ASC")
+    .addOrderBy("event.event_sequence", "ASC")
+    .getMany();
+  const eventsByTask = new Map<number, TaskActivityEvent[]>();
+  for (const event of history) {
+    const list = eventsByTask.get(event.task_id) ?? [];
+    list.push(event);
+    eventsByTask.set(event.task_id, list);
+  }
+
+  for (const task of tasks) {
+    if (task.status !== "pending") continue;
+
+    const taskEvents = eventsByTask.get(task.id) ?? [];
+    // Only a task created by the tracked generator with no later events can be
+    // safely reconciled. Baseline snapshots cannot reveal whether it was edited.
+    const [creation, ...laterEvents] = taskEvents;
+    if (!creation
+      || creation.event_sequence !== 1
+      || creation.event_type !== "created"
+      || creation.routine_id_snapshot !== routineId
+      || laterEvents.some((event) =>
+        !["updated", "rescheduled"].includes(event.event_type)
+        || event.before_snapshot?.change_source !== "routine_reconciliation")) continue;
+
+    let selected: RoutineVersion | undefined;
+    for (const version of versions) {
+      if (version.effective_from_date <= task.task_date) selected = version;
+    }
+    const isApplicable = selected !== undefined
+      && selected.change_type !== "deleted"
+      && selected.is_active
+      && selected.starts_on <= task.task_date
+      && (selected.ends_on === null || selected.ends_on >= task.task_date)
+      && selected.weekdays.some((weekday) => weekday.iso_weekday === isoWeekday(task.task_date));
+
+    const origin: RoutineOrigin = {
+      routineId,
+      occurrenceDate: taskEvents[0].routine_occurrence_date ?? task.task_date,
+    };
+    if (!selected || !isApplicable) {
+      await recordTaskEvent(
+        manager,
+        userId,
+        task,
+        "deleted",
+        snapshotTask(task, origin, "routine_reconciliation"),
+        origin,
+      );
+      await manager.getRepository(Task).delete({ id: task.id, user_id: userId });
+      continue;
+    }
+
+    const nextTitle = selected.title;
+    const nextDescription = selected.description;
+    const nextScheduledTime = selected.scheduled_time;
+    const changed = task.title !== nextTitle
+      || task.description !== nextDescription
+      || normalizeSqlTime(task.scheduled_time) !== normalizeSqlTime(nextScheduledTime);
+    if (!changed) continue;
+
+    const beforeSnapshot = snapshotTask(task, origin, "routine_reconciliation");
+    const isRescheduled = normalizeSqlTime(task.scheduled_time) !== normalizeSqlTime(nextScheduledTime);
+    task.title = nextTitle;
+    task.description = nextDescription;
+    task.scheduled_time = nextScheduledTime;
+    const savedTask = await manager.getRepository(Task).save(task);
+    await recordTaskEvent(
+      manager,
+      userId,
+      savedTask,
+      isRescheduled ? "rescheduled" : "updated",
+      beforeSnapshot,
+      origin,
+    );
+  }
 }
