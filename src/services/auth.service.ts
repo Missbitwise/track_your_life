@@ -6,6 +6,8 @@ import { appDataSource } from "../config/database.js";
 import { getJwtConfiguration } from "../config/jwt.js";
 import { RefreshToken } from "../entities/RefreshToken.js";
 import { User } from "../entities/User.js";
+import { UserTimeZoneVersion } from "../entities/UserTimeZoneVersion.js";
+import { databaseNow, isValidTimeZone, localDateAt } from "./time-zone.service.js";
 import type { LoginBody, RegisterBody } from "../validators/auth.validator.js";
 
 const BCRYPT_ROUNDS = 12;
@@ -157,6 +159,17 @@ export async function registerUser(input: RegisterBody): Promise<AuthResult> {
         last_name: input.last_name ?? null,
       });
       const savedUser = await userRepository.save(user);
+      if (!isValidTimeZone(savedUser.time_zone)) {
+        throw new Error("User timezone default is not a valid IANA timezone");
+      }
+      const createdAt = await databaseNow(manager);
+      await manager.getRepository(UserTimeZoneVersion).save({
+        user_id: savedUser.id,
+        version_no: 1,
+        time_zone: savedUser.time_zone,
+        effective_from_date: localDateAt(createdAt, savedUser.time_zone),
+        effective_at: createdAt,
+      });
       const tokens = await issueTokenPair(manager, savedUser.id);
       return { ...tokens, user: toPublicUser(savedUser) };
     });
