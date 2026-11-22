@@ -6,3 +6,7 @@ export { RoutineWeekday } from "./RoutineWeekday.js";
 export { Reminder } from "./Reminder.js";
 export { Notification } from "./Notification.js";
 export { Note } from "./Note.js";
+export { TaskActivityEvent } from "./TaskActivityEvent.js";
+export { RoutineVersion } from "./RoutineVersion.js";
+export { RoutineVersionWeekday } from "./RoutineVersionWeekday.js";
+export { UserTimeZoneVersion } from "./UserTimeZoneVersion.js";
