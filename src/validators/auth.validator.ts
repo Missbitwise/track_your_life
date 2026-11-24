@@ -11,6 +11,7 @@ export const registerBodySchema = z.object({
   password: passwordSchema,
   first_name: z.string().trim().min(1).max(100).optional(),
   last_name: z.string().trim().min(1).max(100).optional(),
+  username: z.string().trim().min(3).max(32).regex(/^[a-zA-Z0-9_]+$/).optional(),
 }).strict();
 
 export const loginBodySchema = z.object({
