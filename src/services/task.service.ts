@@ -144,23 +144,29 @@ async function lockUserForTaskWrites(manager: EntityManager, userId: number): Pr
   if (!user) throw new Error("Task owner not found");
 }
 
+export async function createTaskInTransaction(
+  manager: EntityManager,
+  userId: number,
+  input: CreateTaskBody,
+): Promise<Task> {
+  await lockUserForTaskWrites(manager, userId);
+  const repository = manager.getRepository(Task);
+  const task = await repository.save(repository.create({
+    user_id: userId,
+    routine_id: null,
+    title: input.title,
+    description: input.description ?? null,
+    task_date: input.task_date,
+    scheduled_time: input.scheduled_time ?? null,
+    status: "pending",
+    completed_at: null,
+  }));
+  await recordTaskEvent(manager, userId, task, "created", null, null);
+  return task;
+}
+
 export async function createTask(userId: number, input: CreateTaskBody): Promise<Task> {
-  return appDataSource.transaction(async (manager) => {
-    await lockUserForTaskWrites(manager, userId);
-    const repository = manager.getRepository(Task);
-    const task = await repository.save(repository.create({
-      user_id: userId,
-      routine_id: null,
-      title: input.title,
-      description: input.description ?? null,
-      task_date: input.task_date,
-      scheduled_time: input.scheduled_time ?? null,
-      status: "pending",
-      completed_at: null,
-    }));
-    await recordTaskEvent(manager, userId, task, "created", null, null);
-    return task;
-  });
+  return appDataSource.transaction((manager) => createTaskInTransaction(manager, userId, input));
 }
 
 export async function getTasksForDate(userId: number, taskDate: string): Promise<Task[]> {
