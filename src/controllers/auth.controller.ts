@@ -1,5 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
-import { EmailAlreadyExistsError, loginUser, logoutUser, RefreshTokenError, registerUser, rotateRefreshToken } from "../services/auth.service.js";
+import { EmailAlreadyExistsError, UsernameAlreadyExistsError, loginUser, logoutUser, RefreshTokenError, registerUser, rotateRefreshToken } from "../services/auth.service.js";
 import { loginBodySchema, refreshBodySchema, registerBodySchema } from "../validators/auth.validator.js";
 
 export async function register(request: Request, response: Response, next: NextFunction): Promise<void> {
@@ -15,6 +15,10 @@ export async function register(request: Request, response: Response, next: NextF
   } catch (error) {
     if (error instanceof EmailAlreadyExistsError) {
       response.status(409).json({ error: "An account with this email already exists" });
+      return;
+    }
+    if (error instanceof UsernameAlreadyExistsError) {
+      response.status(409).json({ error: error.message });
       return;
     }
     next(error);
