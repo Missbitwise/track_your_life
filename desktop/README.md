@@ -11,7 +11,22 @@ npm install
 npm run start
 ```
 
-The start command installs the matching Electron runtime before building and launching the app.
+`start` builds the TypeScript main/preload processes and launches the app in Electron.
+
+## Build a Windows installer
+
+Run these commands from `desktop/` on Windows:
+
+```sh
+npm install
+npm run build
+npm run pack:win # Optional: unpacked app for testing
+npm run dist:win # NSIS installer
+```
+
+The installer is written to `desktop/release/Productivity-Setup-1.0.0.exe` (the version in `package.json` determines the filename). It installs per user by default and allows choosing the install directory. The bundled Electron runtime means end users do not need Node.js or npm.
+
+To publish manually, push the source and create a GitHub Release in `Missbitwise/track_your_life` with a tag matching the app version (for example `v1.0.0`), then attach the generated installer. The GitHub publish provider is configured for future use, but these scripts do not publish or upload anything. No token is stored in the project; electron-builder uses its normal environment-based GitHub authentication if publishing is invoked explicitly.
 
 Sign in with the same account used by the website. Enter the backend origin (for example `http://localhost:3000`). The app polls `GET /api/reminders` every 20 seconds and uses the existing `/api/auth/login`, `/api/auth/refresh`, `/api/auth/logout`, and `PATCH /api/reminders/:id` endpoints.
 
