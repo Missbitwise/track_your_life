@@ -7,6 +7,7 @@ import { Routine } from "./Routine.js";
 import { Task } from "./Task.js";
 
 @Index("uq_users_email_lower", { synchronize: false })
+@Index("uq_users_username_lower", { synchronize: false })
 @Entity({ name: "users" })
 export class User {
   @PrimaryGeneratedColumn()
@@ -14,6 +15,9 @@ export class User {
 
   @Column({ type: "varchar", length: 255 })
   email!: string;
+
+  @Column({ type: "varchar", length: 32, nullable: true })
+  username!: string | null;
 
   @Column({ type: "varchar", length: 255 })
   password_hash!: string;
