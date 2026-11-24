@@ -17,6 +17,7 @@ const REFRESH_TOKEN_LIFETIME = "7d" as const;
 export interface PublicUser {
   id: number;
   email: string;
+  username: string | null;
   first_name: string | null;
   last_name: string | null;
   created_at: Date;
@@ -51,10 +52,15 @@ export class EmailAlreadyExistsError extends Error {
   }
 }
 
+export class UsernameAlreadyExistsError extends Error {
+  constructor() { super("This username is already in use"); this.name = "UsernameAlreadyExistsError"; }
+}
+
 function toPublicUser(user: User): PublicUser {
   return {
     id: user.id,
     email: user.email,
+    username: user.username,
     first_name: user.first_name,
     last_name: user.last_name,
     created_at: user.created_at,
@@ -154,6 +160,7 @@ export async function registerUser(input: RegisterBody): Promise<AuthResult> {
 
       const user = userRepository.create({
         email: input.email,
+        username: input.username ?? null,
         password_hash: passwordHash,
         first_name: input.first_name ?? null,
         last_name: input.last_name ?? null,
@@ -175,6 +182,8 @@ export async function registerUser(input: RegisterBody): Promise<AuthResult> {
     });
   } catch (error) {
     if (error instanceof QueryFailedError && isUniqueConstraintViolation(error)) {
+      const constraint = (error.driverError as { constraint?: string }).constraint;
+      if (constraint === "uq_users_username_lower") throw new UsernameAlreadyExistsError();
       throw new EmailAlreadyExistsError();
     }
     throw error;
