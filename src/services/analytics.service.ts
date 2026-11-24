@@ -655,6 +655,7 @@ function mostAndLeastProductive(reports: DailyAnalyticsReport[]): {
 async function withAnalyticsSnapshot<T>(
   userId: number,
   work: (manager: EntityManager, history: UserHistory) => Promise<T>,
+  authorize?: (manager: EntityManager) => Promise<void>,
 ): Promise<T> {
   return appDataSource.transaction("REPEATABLE READ", async (manager) => {
     await manager.query("SET TRANSACTION READ ONLY");
@@ -663,16 +664,37 @@ async function withAnalyticsSnapshot<T>(
     // the same database snapshot.
     const [clock] = await manager.query("SELECT transaction_timestamp() AS now") as Array<{ now: Date }>;
     if (!clock?.now) throw new Error("Unable to read the database clock for analytics");
+    if (authorize) await authorize(manager);
     const history = await loadUserHistory(manager, userId, clock.now);
     return work(manager, history);
   });
 }
 
-export async function getDailyProductivity(userId: number, date: string): Promise<DailyAnalyticsReport> {
+export async function getDailyProductivity(
+  userId: number,
+  date: string,
+  authorize?: (manager: EntityManager) => Promise<void>,
+): Promise<DailyAnalyticsReport> {
   return withAnalyticsSnapshot(userId, async (manager, history) => {
     const [report] = await buildReports(manager, history, [date]).then((reports) => [reports.get(date)]);
     if (!report) throw new Error("Daily analytics report could not be assembled");
     return report;
+  }, authorize);
+}
+
+/** Internal read-only batch access for bounded assistant analysis; never generates tasks. */
+export async function getDailyProductivityRange(
+  userId: number,
+  startDate: string,
+  endDate: string,
+): Promise<DailyAnalyticsReport[]> {
+  const dates = dateRange(startDate, endDate);
+  if (dates.length < 1 || dates.length > 31) {
+    throw new RangeError("Analytics date range must contain between 1 and 31 dates");
+  }
+  return withAnalyticsSnapshot(userId, async (manager, history) => {
+    const reports = await buildReports(manager, history, dates);
+    return dates.map((date) => reports.get(date)!).filter(Boolean);
   });
 }
 
@@ -724,7 +746,7 @@ function comparison(current: ReturnType<typeof periodResult>, previous: ReturnTy
   };
 }
 
-export async function getWeeklyProductivity(userId: number, startDate: string) {
+export async function getWeeklyProductivity(userId: number, startDate: string, authorize?: (manager: EntityManager) => Promise<void>) {
   return withAnalyticsSnapshot(userId, async (manager, history) => {
     const endDate = addCalendarDays(startDate, 6);
     const previousStart = addCalendarDays(startDate, -7);
@@ -734,10 +756,10 @@ export async function getWeeklyProductivity(userId: number, startDate: string) {
     const previous = periodResult(previousStart, previousEnd, dateRange(previousStart, previousEnd).map((date) => reports.get(date)!));
     const current = periodResult(startDate, endDate, dateRange(startDate, endDate).map((date) => reports.get(date)!));
     return { ...current, comparison: comparison(current, previous) };
-  });
+  }, authorize);
 }
 
-export async function getMonthlyProductivity(userId: number, year: number, month: number) {
+export async function getMonthlyProductivity(userId: number, year: number, month: number, authorize?: (manager: EntityManager) => Promise<void>) {
   return withAnalyticsSnapshot(userId, async (manager, history) => {
     const startDate = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-01`;
     const firstOfNextMonth = month === 12
@@ -754,5 +776,5 @@ export async function getMonthlyProductivity(userId: number, year: number, month
     const previous = periodResult(previousStart, previousEnd, previousDates.map((date) => reports.get(date)!));
     const current = periodResult(startDate, endDate, currentDates.map((date) => reports.get(date)!));
     return { year, month, ...current, comparison: comparison(current, previous) };
-  });
+  }, authorize);
 }
