@@ -1,20 +1,56 @@
 {
   "name": "productivity-desktop",
   "version": "1.0.0",
+  "productName": "Productivity",
+  "description": "Productivity desktop companion for reminders",
+  "author": "Missbitwise",
   "private": true,
-  "description": "Windows desktop companion for Productivity reminders",
   "type": "module",
   "main": "dist/main.js",
   "scripts": {
     "install:runtime": "install-electron",
     "build": "tsc -p tsconfig.json",
-    "start": "npm run install:runtime && npm run build && electron .",
-    "dev": "npm run install:runtime && npm run build && electron .",
-    "watch": "tsc -p tsconfig.json --watch"
+    "start": "npm run build && electron .",
+    "dev": "npm run build && electron .",
+    "watch": "tsc -p tsconfig.json --watch",
+    "dist:win": "npm run build && electron-builder --win nsis",
+    "pack:win": "npm run build && electron-builder --win dir"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
     "electron": "^45.3.3",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.productivity.reminders",
+    "productName": "Productivity",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "src/renderer/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": ["nsis"]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Productivity",
+      "artifactName": "Productivity-Setup-${version}.${ext}"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "Missbitwise",
+      "repo": "track_your_life",
+      "releaseType": "release"
+    }
   }
 }
