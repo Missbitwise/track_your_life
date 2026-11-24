@@ -1,0 +1,25 @@
+import { Router } from "express";
+import * as controller from "../controllers/friends.controller.js";
+import { authenticate } from "../middlewares/authenticate.js";
+
+export const friendsRoutes = Router();
+friendsRoutes.use(authenticate);
+friendsRoutes.get("/search", controller.search);
+friendsRoutes.get("/invitation-link", controller.invitationLink);
+friendsRoutes.delete("/invitation-link", controller.revokeInvitation);
+friendsRoutes.get("/invitation/:token", controller.invitation);
+friendsRoutes.post("/requests", controller.sendRequest);
+friendsRoutes.get("/requests/received", controller.receivedRequests);
+friendsRoutes.get("/requests/sent", controller.sentRequests);
+friendsRoutes.patch("/requests/:id/accept", controller.acceptRequest);
+friendsRoutes.patch("/requests/:id/reject", controller.rejectRequest);
+friendsRoutes.delete("/requests/:id", controller.cancelRequest);
+friendsRoutes.get("/leaderboard", controller.leaderboard);
+friendsRoutes.get("/", controller.friends);
+friendsRoutes.delete("/:friendId", controller.removeFriend);
+friendsRoutes.post("/:userId/block", controller.block);
+friendsRoutes.delete("/:userId/block", controller.unblock);
+friendsRoutes.get("/blocked", controller.blocked);
+friendsRoutes.get("/:friendId/productivity/daily", controller.friendDaily);
+friendsRoutes.get("/:friendId/productivity/weekly", controller.friendWeekly);
+friendsRoutes.get("/:friendId/productivity/monthly", controller.friendMonthly);
