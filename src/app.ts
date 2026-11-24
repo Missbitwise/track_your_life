@@ -5,6 +5,8 @@ import rateLimit from "express-rate-limit";
 import { pinoHttp } from "pino-http";
 import { logger } from "./config/logger.js";
 import { authRoutes } from "./routes/auth.routes.js";
+import { friendsRoutes } from "./routes/friends.routes.js";
+import { assistantRoutes } from "./routes/assistant.routes.js";
 import { analyticsRoutes } from "./routes/analytics.routes.js";
 import { noteRoutes } from "./routes/note.routes.js";
 import { reminderRoutes } from "./routes/reminder.routes.js";
@@ -29,7 +31,7 @@ app.use(pinoHttp({
     req: (request: import("node:http").IncomingMessage) => ({
       method: request.method,
       // Query strings can contain tokens or other secrets.
-      url: request.url?.split("?", 1)[0],
+      url: request.url?.split("?", 1)[0]?.replace(/(\/api\/friends\/invitation\/)[^/]+/, "$1[redacted]"),
     }),
   },
 }));
@@ -45,6 +47,8 @@ app.get("/health", (_request, response) => {
 });
 
 app.use("/api/auth", authRoutes);
+app.use("/api/friends", friendsRoutes);
+app.use("/api/assistant", assistantRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/notes", noteRoutes);
 app.use("/api/reminders", reminderRoutes);
