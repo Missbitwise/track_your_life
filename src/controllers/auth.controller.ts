@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import { EmailAlreadyExistsError, UsernameAlreadyExistsError, loginUser, logoutUser, RefreshTokenError, registerUser, rotateRefreshToken } from "../services/auth.service.js";
 import { loginBodySchema, refreshBodySchema, registerBodySchema } from "../validators/auth.validator.js";
+import { clearAuthCookies, isDesktopTokenClient, readCookie, REFRESH_COOKIE, setAuthCookies } from "../config/auth-cookies.js";
 
 export async function register(request: Request, response: Response, next: NextFunction): Promise<void> {
   const parsed = registerBodySchema.safeParse(request.body);
@@ -11,7 +12,8 @@ export async function register(request: Request, response: Response, next: NextF
 
   try {
     const result = await registerUser(parsed.data);
-    response.status(201).json(result);
+    setAuthCookies(response, result);
+    response.status(201).json(isDesktopTokenClient(request) ? result : { user: result.user });
   } catch (error) {
     if (error instanceof EmailAlreadyExistsError) {
       response.status(409).json({ error: "An account with this email already exists" });
@@ -38,22 +40,23 @@ export async function login(request: Request, response: Response, next: NextFunc
       response.status(401).json({ error: "Invalid email or password" });
       return;
     }
-    response.status(200).json(result);
+    setAuthCookies(response, result);
+    response.status(200).json(isDesktopTokenClient(request) ? result : { user: result.user });
   } catch (error) {
     next(error);
   }
 }
 
 export async function refresh(request: Request, response: Response, next: NextFunction): Promise<void> {
-  const parsed = refreshBodySchema.safeParse(request.body);
-  if (!parsed.success) {
-    response.status(400).json({ error: "Invalid refresh token request" });
-    return;
-  }
+  const token = readCookie(request, REFRESH_COOKIE) ?? (isDesktopTokenClient(request)
+    ? refreshBodySchema.safeParse(request.body).data?.refreshToken
+    : undefined);
+  if (!token) { response.status(400).json({ error: "Invalid refresh token request" }); return; }
 
   try {
-    const tokens = await rotateRefreshToken(parsed.data.refreshToken);
-    response.status(200).json(tokens);
+    const tokens = await rotateRefreshToken(token);
+    setAuthCookies(response, tokens);
+    response.status(200).json(isDesktopTokenClient(request) ? tokens : { ok: true });
   } catch (error) {
     if (error instanceof RefreshTokenError) {
       response.status(401).json({ error: error.message, code: error.code });
@@ -66,6 +69,7 @@ export async function refresh(request: Request, response: Response, next: NextFu
 export async function logout(request: Request, response: Response, next: NextFunction): Promise<void> {
   try {
     await logoutUser(request.auth!.userId);
+    clearAuthCookies(response);
     response.status(200).json({ message: "Logged out. All refresh tokens for this user have been revoked." });
   } catch (error) {
     next(error);
