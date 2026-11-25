@@ -4,6 +4,7 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { pinoHttp } from "pino-http";
 import { logger } from "./config/logger.js";
+import { enforceAllowedOrigin, getAllowedOrigins } from "./config/auth-cookies.js";
 import { authRoutes } from "./routes/auth.routes.js";
 import { friendsRoutes } from "./routes/friends.routes.js";
 import { assistantRoutes } from "./routes/assistant.routes.js";
@@ -23,7 +24,18 @@ export const setDatabaseConnected = (connected: boolean) => {
 
 app.disable("x-powered-by");
 app.use(helmet());
-app.use(cors());
+const allowedOrigins = getAllowedOrigins();
+app.use((request, response, next) => {
+  if (!enforceAllowedOrigin(request, response)) return;
+  next();
+});
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) callback(null, true);
+    else callback(null, false);
+  },
+  credentials: true,
+}));
 app.use(express.json({ limit: "1mb" }));
 app.use(pinoHttp({
   logger,
@@ -33,6 +45,8 @@ app.use(pinoHttp({
       // Query strings can contain tokens or other secrets.
       url: request.url?.split("?", 1)[0]?.replace(/(\/api\/friends\/invitation\/)[^/]+/, "$1[redacted]"),
     }),
+    // Response headers can contain HttpOnly auth cookies; never include them in logs.
+    res: (response: import("node:http").ServerResponse) => ({ statusCode: response.statusCode }),
   },
 }));
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, limit: 100 }));
