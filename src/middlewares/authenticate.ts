@@ -1,18 +1,20 @@
 import type { NextFunction, Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import { getJwtConfiguration } from "../config/jwt.js";
+import { ACCESS_COOKIE, readCookie } from "../config/auth-cookies.js";
 
 export function authenticate(request: Request, response: Response, next: NextFunction): void {
   const authorization = request.get("authorization");
   const match = authorization?.match(/^Bearer\s+(\S+)$/i);
-  if (!match) {
+  const token = readCookie(request, ACCESS_COOKIE) ?? match?.[1];
+  if (!token) {
     response.status(401).json({ error: "Unauthorized" });
     return;
   }
 
   try {
     const configuration = getJwtConfiguration();
-    const payload = jwt.verify(match[1], configuration.accessSecret, { algorithms: ["HS256"] });
+    const payload = jwt.verify(token, configuration.accessSecret, { algorithms: ["HS256"] });
     if (typeof payload === "string" || !payload.sub || !/^\d+$/.test(payload.sub)) {
       response.status(401).json({ error: "Unauthorized" });
       return;
