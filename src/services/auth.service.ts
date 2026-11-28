@@ -1,8 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
-import { QueryFailedError, type EntityManager } from "typeorm";
+import { OAuth2Client } from "google-auth-library";
+import type { TokenPayload } from "google-auth-library";
+import { QueryFailedError, Raw, type EntityManager } from "typeorm";
 import { appDataSource } from "../config/database.js";
+import { getGoogleClientId } from "../config/google.js";
 import { getJwtConfiguration } from "../config/jwt.js";
 import { RefreshToken } from "../entities/RefreshToken.js";
 import { User } from "../entities/User.js";
@@ -13,6 +16,7 @@ import type { LoginBody, RegisterBody } from "../validators/auth.validator.js";
 const BCRYPT_ROUNDS = 12;
 const ACCESS_TOKEN_LIFETIME = "15m" as const;
 const REFRESH_TOKEN_LIFETIME = "7d" as const;
+const googleClient = new OAuth2Client();
 
 export interface PublicUser {
   id: number;
@@ -54,6 +58,18 @@ export class EmailAlreadyExistsError extends Error {
 
 export class UsernameAlreadyExistsError extends Error {
   constructor() { super("This username is already in use"); this.name = "UsernameAlreadyExistsError"; }
+}
+
+export class GoogleCredentialError extends Error {
+  constructor() { super("Google credential is invalid or could not be verified"); this.name = "GoogleCredentialError"; }
+}
+
+export class GoogleAccountConflictError extends Error {
+  constructor() { super("This email is already associated with a different Google identity"); this.name = "GoogleAccountConflictError"; }
+}
+
+export class GoogleConfigurationError extends Error {
+  constructor() { super("Google authentication is not configured"); this.name = "GoogleConfigurationError"; }
 }
 
 function toPublicUser(user: User): PublicUser {
@@ -193,13 +209,92 @@ export async function registerUser(input: RegisterBody): Promise<AuthResult> {
 export async function loginUser(input: LoginBody): Promise<AuthResult | null> {
   const repository = appDataSource.getRepository(User);
   const user = await repository.findOne({ where: { email: input.email } });
-  if (!user || !(await bcrypt.compare(input.password, user.password_hash))) return null;
+  if (!user?.password_hash || !(await bcrypt.compare(input.password, user.password_hash))) return null;
 
   return appDataSource.transaction(async (manager) => {
     const currentUser = await lockUser(manager, user.id);
     if (!currentUser) return null;
     const tokens = await issueTokenPair(manager, currentUser.id);
     return { ...tokens, user: toPublicUser(currentUser) };
+  });
+}
+
+export async function loginWithGoogle(credential: string): Promise<AuthResult> {
+  const clientId = getGoogleClientId();
+  if (!clientId) throw new GoogleConfigurationError();
+
+  let payload: TokenPayload | undefined;
+  try {
+    const ticket = await googleClient.verifyIdToken({ idToken: credential, audience: clientId });
+    payload = ticket.getPayload();
+  } catch {
+    throw new GoogleCredentialError();
+  }
+  const issuer = payload?.iss;
+  if (!payload || !payload.sub || !payload.email || payload.email_verified !== true
+    || (issuer !== "accounts.google.com" && issuer !== "https://accounts.google.com")
+    || payload.aud !== clientId || (payload.exp !== undefined && payload.exp <= Math.floor(Date.now() / 1000))) {
+    throw new GoogleCredentialError();
+  }
+
+  const email = payload.email.trim().toLowerCase();
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new GoogleCredentialError();
+
+  return appDataSource.transaction(async (manager) => {
+    const users = manager.getRepository(User);
+    let user = await users.findOne({ where: { google_id: payload!.sub } });
+    if (!user) {
+      const emailOwner = await users.findOne({
+        where: { email: Raw((column) => `LOWER(${column}) = :googleEmail`, { googleEmail: email }) },
+        lock: { mode: "pessimistic_write" },
+      });
+      if (emailOwner) {
+        if (emailOwner.google_id && emailOwner.google_id !== payload!.sub) {
+          throw new GoogleAccountConflictError();
+        }
+        emailOwner.google_id = payload!.sub;
+        user = await users.save(emailOwner);
+      } else {
+        user = await users.save(users.create({
+          google_id: payload!.sub,
+          email,
+          username: null,
+          password_hash: null,
+          first_name: payload!.given_name ?? null,
+          last_name: payload!.family_name ?? null,
+        }));
+        if (!isValidTimeZone(user.time_zone)) throw new Error("User timezone default is not a valid IANA timezone");
+        const createdAt = await databaseNow(manager);
+        await manager.getRepository(UserTimeZoneVersion).save({
+          user_id: user.id,
+          version_no: 1,
+          time_zone: user.time_zone,
+          effective_from_date: localDateAt(createdAt, user.time_zone),
+          effective_at: createdAt,
+        });
+      }
+    }
+    const currentUser = await lockUser(manager, user.id);
+    if (!currentUser) throw new GoogleCredentialError();
+    const tokens = await issueTokenPair(manager, currentUser.id);
+    return { ...tokens, user: toPublicUser(currentUser) };
+  }).catch(async (error: unknown) => {
+    if (error instanceof QueryFailedError && isUniqueConstraintViolation(error)) {
+      const constraint = (error.driverError as { constraint?: string }).constraint;
+      if (constraint === "uq_users_email_lower" || constraint === "uq_users_google_id") {
+        const user = await appDataSource.getRepository(User).findOne({ where: { google_id: payload!.sub } });
+        if (user) {
+          return appDataSource.transaction(async (manager) => {
+            const currentUser = await lockUser(manager, user.id);
+            if (!currentUser) throw error;
+            const tokens = await issueTokenPair(manager, currentUser.id);
+            return { ...tokens, user: toPublicUser(currentUser) };
+          });
+        }
+        throw new GoogleAccountConflictError();
+      }
+    }
+    throw error;
   });
 }
 
