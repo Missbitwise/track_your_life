@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
-import { EmailAlreadyExistsError, UsernameAlreadyExistsError, loginUser, logoutUser, RefreshTokenError, registerUser, rotateRefreshToken } from "../services/auth.service.js";
-import { loginBodySchema, refreshBodySchema, registerBodySchema } from "../validators/auth.validator.js";
+import { EmailAlreadyExistsError, GoogleAccountConflictError, GoogleConfigurationError, GoogleCredentialError, UsernameAlreadyExistsError, loginUser, loginWithGoogle, logoutUser, RefreshTokenError, registerUser, rotateRefreshToken } from "../services/auth.service.js";
+import { googleBodySchema, loginBodySchema, refreshBodySchema, registerBodySchema } from "../validators/auth.validator.js";
 import { clearAuthCookies, isDesktopTokenClient, readCookie, REFRESH_COOKIE, setAuthCookies } from "../config/auth-cookies.js";
 
 export async function register(request: Request, response: Response, next: NextFunction): Promise<void> {
@@ -47,11 +47,34 @@ export async function login(request: Request, response: Response, next: NextFunc
   }
 }
 
+export async function google(request: Request, response: Response, next: NextFunction): Promise<void> {
+  const parsed = googleBodySchema.safeParse(request.body);
+  if (!parsed.success) {
+    response.status(400).json({ error: "Invalid Google authentication request", details: parsed.error.flatten().fieldErrors });
+    return;
+  }
+  try {
+    const result = await loginWithGoogle(parsed.data.credential);
+    setAuthCookies(response, result);
+    response.status(200).json({ user: result.user });
+  } catch (error) {
+    if (error instanceof GoogleCredentialError) { response.status(401).json({ error: error.message }); return; }
+    if (error instanceof GoogleAccountConflictError) { response.status(409).json({ error: error.message, code: "GOOGLE_ACCOUNT_CONFLICT" }); return; }
+    if (error instanceof GoogleConfigurationError) { response.status(503).json({ error: error.message }); return; }
+    next(error);
+  }
+}
+
 export async function refresh(request: Request, response: Response, next: NextFunction): Promise<void> {
-  const token = readCookie(request, REFRESH_COOKIE) ?? (isDesktopTokenClient(request)
+  const desktopClient = isDesktopTokenClient(request);
+  const token = readCookie(request, REFRESH_COOKIE) ?? (desktopClient
     ? refreshBodySchema.safeParse(request.body).data?.refreshToken
     : undefined);
-  if (!token) { response.status(400).json({ error: "Invalid refresh token request" }); return; }
+  if (!token) {
+    if (!desktopClient) clearAuthCookies(response);
+    response.status(desktopClient ? 400 : 401).json({ error: desktopClient ? "Invalid refresh token request" : "Refresh token is missing" });
+    return;
+  }
 
   try {
     const tokens = await rotateRefreshToken(token);
@@ -59,6 +82,7 @@ export async function refresh(request: Request, response: Response, next: NextFu
     response.status(200).json(isDesktopTokenClient(request) ? tokens : { ok: true });
   } catch (error) {
     if (error instanceof RefreshTokenError) {
+      if (!desktopClient) clearAuthCookies(response);
       response.status(401).json({ error: error.message, code: error.code });
       return;
     }
